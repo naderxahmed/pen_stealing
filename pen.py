@@ -28,12 +28,17 @@ def main():
         depth_scale = depth_sensor.get_depth_scale()
         print("Depth Scale is: " , depth_scale)
 
-        # align_to = rs.stream.color
-        # align = rs.align(align_to)
-
+        align_to = rs.stream.color
+        align = rs.align(align_to)
+        center = None
         while True: 
             frames = pipe.wait_for_frames()
+            aligned_frames = align.process(frames)
+            aligned_depth_frame = aligned_frames.get_depth_frame()
+
             color_frame = frames.get_color_frame() 
+
+            depth_img = np.asanyarray(aligned_depth_frame.get_data())
             color_img = np.asanyarray(color_frame.get_data())
 
             hsv = cv2.cvtColor(color_img, cv2.COLOR_BGR2HSV)
@@ -45,31 +50,32 @@ def main():
             mask = cv2.inRange(hsv, purple_lower, purple_upper)
             result = cv2.bitwise_and(color_img, color_img, mask=mask)
 
-            kernel = np.ones((5, 5), np.uint8)
+            kernel = np.ones((3, 3), np.uint8)
             result = cv2.erode(result, kernel, iterations=2)
-            result = cv2.dilate(result,kernel,iterations=4)
+            result = cv2.dilate(result,kernel,iterations=6)
+            result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel,iterations=40)
 
             temp = cv2.cvtColor(result,cv2.COLOR_BGR2GRAY)
             contours, hierarchy = cv2.findContours(temp, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-            
-
             contours = sorted(contours,key=cv2.contourArea,reverse=True)
 
-            
-            cv2.drawContours(result, contours[0:2], -1, (0,255,0), 1)
+            for cnt in contours: 
+                if cv2.arcLength(cnt,True) > 100: 
+                    cv2.drawContours(color_img, contours[0:2], -1, (0,255,0), 1)
+                    if len(contours) == 2: 
+                        top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
+                        average_x = int((top_center[0]+bottom_center[0])/2)
+                        average_y = int((top_center[1]+bottom_center[1])/2)
+                        center = (average_x,average_y)
+                        cv2.circle(color_img, center, 5, (0,0,255),2)
 
-            if len(contours) == 2: 
+                    elif len(contours)==1: 
+                        center = compute_center(contours[0]) 
+                        cv2.circle(color_img, center, 5, (0,0,255),2)
 
-                top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
-                average_x = int((top_center[0]+bottom_center[0])/2)
-                average_y = int((top_center[1]+bottom_center[1])/2)
-                cv2.circle(result, (average_x,average_y), 5, (0,0,255),2)
-
-            elif len(contours)==1: 
-                center = compute_center(contours[0]) 
-                cv2.circle(result, center, 5, (0,0,255),2)
-
+                    if center: 
+                        print("distance",aligned_depth_frame.get_distance(center[0],center[1]))
 
             # for cnt in contours:
             #     print(len(contours))
@@ -78,9 +84,8 @@ def main():
                     # ellipse = cv2.fitEllipse(cnt)
                     # cv2.ellipse(result, ellipse, (255,0, 255), 1, cv2.LINE_AA)
  
-                    
-         
-            cv2.imshow("img",result)
+            cv2.imshow("img",color_img)
+           
             cv2.waitKey(1) 
             
     finally:
