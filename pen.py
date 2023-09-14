@@ -47,14 +47,20 @@ def main():
 
             kernel = np.ones((5, 5), np.uint8)
             result = cv2.erode(result, kernel, iterations=2)
-            result = cv2.dilate(result,kernel,iterations=6)
+            result = cv2.dilate(result,kernel,iterations=4)
 
             temp = cv2.cvtColor(result,cv2.COLOR_BGR2GRAY)
             contours, hierarchy = cv2.findContours(temp, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        
-            cv2.drawContours(result, contours, -1, (0,255,0), 1)
+
+            
+
+            contours = sorted(contours,key=cv2.contourArea,reverse=True)
+
+            
+            cv2.drawContours(result, contours[0:2], -1, (0,255,0), 1)
 
             if len(contours) == 2: 
+
                 top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
                 average_x = int((top_center[0]+bottom_center[0])/2)
                 average_y = int((top_center[1]+bottom_center[1])/2)
