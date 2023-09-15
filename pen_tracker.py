@@ -1,6 +1,10 @@
 import cv2
 import numpy as np
 import pyrealsense2 as rs
+from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
+import modern_robotics as mr 
+
+robot = InterbotixManipulatorXS("px100", "arm", "gripper")
 
 def find_pen_color_mask(hsv_img):
     # Define the purple color range
@@ -37,15 +41,22 @@ def are_contours_near(contour1, contour2, max_distance, max_size_diff):
     size_diff = cv2.contourArea(contour1) / cv2.contourArea(contour2)
     return distance < max_distance and size_diff < max_size_diff
 
-def main():
+
+pen_camera_frame = None 
+
+#finds pen position in camera frame and displays its tracking
+def pen_detection():
+    robot.gripper.release() 
     try:
         # Initialize RealSense pipeline
         pipe = rs.pipeline()
         config = rs.config()
         config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
         config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-        profile = pipe.start(config)
-
+        cfg = pipe.start(config)
+        profile = cfg.get_stream(rs.stream.color)
+        intr = profile.as_video_stream_profile().get_intrinsics()
+    
         align_to = rs.stream.color
         align = rs.align(align_to)
         tracked_center = None
@@ -100,7 +111,15 @@ def main():
 
                         cv2.circle(color_img, center, 10, (0, 0, 255), -1)
 
+                        pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [center[0], center[1]], depth)
 
+                        # deltas = determine_deltas(pen_camera_frame)
+
+                        # goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame+deltas[2]) 
+
+                        # robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
+
+                        
             # If we didn't find the pen in this frame, use the tracked center from the previous frame
             if not found_pen and tracked_center:
                 center = tracked_center
@@ -111,6 +130,29 @@ def main():
     finally:
         pipe.stop()
         cv2.destroyAllWindows()  # Close all windows
+        
+
+#determine the deltas between camera and robot frames when robot arm is at known pen location 
+def determine_deltas(pen_camera_frame): 
+
+    robot.gripper.grasp() 
+    
+    joints = robot.arm.get_joint_commands()
+    T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
+    [R, p] = mr.TransToRp(T) # get the rotation matrix and the displacement
+    pen_robot_frame = [p[0],p[1],p[2]]
+    
+    pen_camera_frame = [pen_camera_frame[0], pen_camera_frame[2], -pen_camera_frame[1]] #switch axes to robot axes , x y z -> x z -y
+    prx, pry, prz = pen_robot_frame
+    pcx, pcy, pcz = pen_camera_frame 
+    return [prx-pcx, pry-pcy, prz-pcz]
+
+
+
+
+
+
+
 
 if __name__ == "__main__":
     main()
