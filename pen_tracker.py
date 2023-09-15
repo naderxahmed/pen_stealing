@@ -111,7 +111,7 @@ def pen_detection(d):
                         cv2.circle(color_img, center, 10, (0, 0, 255), -1)
 
                         pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [center[0], center[1]], depth)
-                        # print("pen camera frame", pen_camera_frame)
+
                         d["pen_camera_frame"] = pen_camera_frame 
                         
             # If we didn't find the pen in this frame, use the tracked center from the previous frame
@@ -127,22 +127,23 @@ def pen_detection(d):
         
 
 #determine the deltas between camera and robot frames when robot arm is at known pen location 
+#add deltas to camera frame to get to robot frame
 def determine_deltas(pen_camera_frame): 
 
     joints = robot.arm.get_joint_commands()
     T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
     [R, p] = mr.TransToRp(T) # get the rotation matrix and the displacement
     pen_robot_frame = [p[0],p[1],p[2]]
+    print("pen_robot_frame",pen_robot_frame)
     
-    pen_camera_frame = [pen_camera_frame[0], pen_camera_frame[2], -pen_camera_frame[1]] #switch axes to robot axes , x y z -> x z -y
     prx, pry, prz = pen_robot_frame
     pcx, pcy, pcz = pen_camera_frame 
-    return [prx-pcx, pry-pcy, prz-pcz]
+    soln = [prx-pcx, pry-prz, prz-pcy]
+    return soln
 
 
 
 def main(): 
-
 
     with Manager() as manager: 
         d = manager.dict() 
@@ -152,7 +153,6 @@ def main():
         p = Process(target=pen_detection,args=(d,))
         p.start() 
         
-    
         mode = 'h'
         robot.gripper.release() 
 
@@ -164,16 +164,23 @@ def main():
                 robot.arm.go_to_home_pose() 
             if mode == 's': 
                 robot.arm.go_to_sleep_pose() 
+            if mode == 'j': #print current robot position
+                joints = robot.arm.get_joint_commands()
+                T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
+                [R, p] = mr.TransToRp(T) # get the rotation matrix and the displacement
+                print("current robot position",p)
+
             if mode == 'c': 
                 robot.gripper.grasp() 
                 if pen_camera_frame:
-                    deltas = determine_deltas(d["pen_camera_frame"]) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
+                    deltas = determine_deltas(pen_camera_frame) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
                     robot.gripper.release() 
                 else: 
                     print("Pen not in view of camera!")
 
             if mode =='p':
-                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame[2]+deltas[2]) 
+                goal_position = (pen_camera_frame[0]+deltas[0], -1*(-pen_camera_frame[1]+deltas[1]), pen_camera_frame[2]-deltas[2]) 
+                print("GOAL POSITION",goal_position)
                 robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
                 robot.gripper.grasp()  
 
