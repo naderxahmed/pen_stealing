@@ -3,8 +3,10 @@ import numpy as np
 import pyrealsense2 as rs
 from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 import modern_robotics as mr 
+from multiprocessing import Process, Manager 
 
 robot = InterbotixManipulatorXS("px100", "arm", "gripper")
+
 
 def find_pen_color_mask(hsv_img):
     # Define the purple color range
@@ -42,11 +44,8 @@ def are_contours_near(contour1, contour2, max_distance, max_size_diff):
     return distance < max_distance and size_diff < max_size_diff
 
 
-pen_camera_frame = None 
-
 #finds pen position in camera frame and displays its tracking
-def pen_detection():
-    robot.gripper.release() 
+def pen_detection(d):
     try:
         # Initialize RealSense pipeline
         pipe = rs.pipeline()
@@ -102,7 +101,7 @@ def pen_detection():
                     if center:
                         found_pen = True
                         tracked_center = center
-                        print("distance", aligned_depth_frame.get_distance(center[0], center[1]))
+                        # print("distance", aligned_depth_frame.get_distance(center[0], center[1]))
                     
                         # Display location and distance
                         cv2.putText(color_img, "Location: {}, {}".format(center[0], center[1]), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
@@ -112,13 +111,8 @@ def pen_detection():
                         cv2.circle(color_img, center, 10, (0, 0, 255), -1)
 
                         pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [center[0], center[1]], depth)
-
-                        # deltas = determine_deltas(pen_camera_frame)
-
-                        # goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame+deltas[2]) 
-
-                        # robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
-
+                        # print("pen camera frame", pen_camera_frame)
+                        d["pen_camera_frame"] = pen_camera_frame 
                         
             # If we didn't find the pen in this frame, use the tracked center from the previous frame
             if not found_pen and tracked_center:
@@ -135,8 +129,6 @@ def pen_detection():
 #determine the deltas between camera and robot frames when robot arm is at known pen location 
 def determine_deltas(pen_camera_frame): 
 
-    robot.gripper.grasp() 
-    
     joints = robot.arm.get_joint_commands()
     T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
     [R, p] = mr.TransToRp(T) # get the rotation matrix and the displacement
@@ -146,6 +138,44 @@ def determine_deltas(pen_camera_frame):
     prx, pry, prz = pen_robot_frame
     pcx, pcy, pcz = pen_camera_frame 
     return [prx-pcx, pry-pcy, prz-pcz]
+
+
+
+def main(): 
+
+
+    with Manager() as manager: 
+        d = manager.dict() 
+        d["pen_camera_frame"] = None 
+
+        #initiate pen detection thread, constantly updating d["pen_camera_frame"]
+        p = Process(target=pen_detection,args=(d,))
+        p.start() 
+        
+    
+        mode = 'h'
+        robot.gripper.release() 
+
+        while mode != 'q':
+            pen_camera_frame = d["pen_camera_frame"]
+
+            mode = input("[h]ome, [s]leep, [q]uit, [c]alibrate, [p]en_tracking,") 
+            if mode == 'h': 
+                robot.arm.go_to_home_pose() 
+            if mode == 's': 
+                robot.arm.go_to_sleep_pose() 
+            if mode == 'c': 
+                robot.gripper.grasp() 
+                if pen_camera_frame:
+                    deltas = determine_deltas(d["pen_camera_frame"]) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
+                    robot.gripper.release() 
+                else: 
+                    print("Pen not in view of camera!")
+
+            if mode =='p':
+                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame[2]+deltas[2]) 
+                robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
+                robot.gripper.grasp()  
 
 
 
