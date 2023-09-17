@@ -44,6 +44,19 @@ def are_contours_near(contour1, contour2, max_distance, max_size_diff):
     return distance < max_distance and size_diff < max_size_diff
 
 
+# Create Kalman filter
+kf = cv2.KalmanFilter(4, 2)
+kf.measurementMatrix = np.array([[1, 0, 0, 0],
+                                 [0, 1, 0, 0]], dtype=np.float32)
+
+kf.processNoiseCov = np.identity(4, dtype=np.float32) * 0.01
+
+kf.measurementNoiseCov = np.identity(2, dtype=np.float32) * 0.1
+
+# Initialize the state [x, y, vx, vy]
+kf.statePost = np.array([0, 0, 0, 0], dtype=np.float32)
+
+
 #finds pen position in camera frame and displays its tracking
 def pen_detection(d):
     try:
@@ -89,21 +102,38 @@ def pen_detection(d):
                 if cv2.arcLength(cnt, True) > 250:
                     cv2.drawContours(color_img, contours[0:2], -1, (0, 255, 0), 1)
 
-                    center = compute_center(contours[0])
+
+                    if len(contours) == 2 and are_contours_near(contours[0], contours[1], max_distance=30, max_size_diff=3):
+                        top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
+                        average_x = int((top_center[0] + bottom_center[0]) / 2)
+                        average_y = int((top_center[1] + bottom_center[1]) / 2)
+                        center = (average_x, average_y)
+
+                    elif len(contours) == 1:
+                        center = compute_center(contours[0])
+   
 
                     if center:
-                        found_pen = True
-                        tracked_center = center
-                        # print("distance", aligned_depth_frame.get_distance(center[0], center[1]))
-                    
+                        found_pen = True 
+
+                        # Predict the state using the Kalman filter
+                        prediction = kf.predict()
+
+                        # Correct the Kalman filter with the new measurement (center)
+                        measurement = np.array([center[0], center[1]], dtype=np.float32)
+                        kf.correct(measurement)
+
+                        # Use the predicted state for display and further processing
+                        predicted_center = (int(prediction[0]), int(prediction[1]))
+
                         # Display location and distance
-                        cv2.putText(color_img, "Location: {}, {}".format(center[0], center[1]), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-                        depth = aligned_depth_frame.get_distance(center[0], center[1])
+                        cv2.putText(color_img, "Location: {}, {}".format(predicted_center[0], predicted_center[1]), (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        depth = aligned_depth_frame.get_distance(predicted_center[0], predicted_center[1])
                         cv2.putText(color_img, "Distance: {:.2f} meters".format(depth), (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
-                        cv2.circle(color_img, center, 10, (0, 0, 255), -1)
+                        cv2.circle(color_img, predicted_center, 10, (0, 0, 255), -1)
 
-                        pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [center[0], center[1]], depth)
+                        pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [predicted_center[0], predicted_center[1]], depth)
 
                         d["pen_camera_frame"] = pen_camera_frame 
                         
@@ -173,7 +203,7 @@ def main():
                     print("Pen not found yet") 
                 
             if mode =='p':
-                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[2]+deltas[1], -1*(-pen_camera_frame[2]+deltas[2]))
+                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[2]+deltas[1], -pen_camera_frame[1]+deltas[2])
                 print("goal position", goal_position)
                 _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
                 if success: 
