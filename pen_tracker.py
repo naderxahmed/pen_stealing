@@ -138,7 +138,7 @@ def determine_deltas(pen_camera_frame):
     
     prx, pry, prz = pen_robot_frame
     pcx, pcy, pcz = pen_camera_frame 
-    soln = [prx-pcx, pry-prz, prz-pcy]
+    soln = [prx-pcx, pry-pcz, prz+pcy]
     return soln
 
 
@@ -171,18 +171,28 @@ def main():
                 print("current robot position",p)
 
             if mode == 'c': 
-                robot.gripper.grasp() 
-                if pen_camera_frame:
+                if pen_camera_frame: 
+                    robot.gripper.grasp() 
                     deltas = determine_deltas(pen_camera_frame) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
                     robot.gripper.release() 
-                else: 
-                    print("Pen not in view of camera!")
 
+                else: 
+                    print("Pen not found yet") 
+                
             if mode =='p':
-                goal_position = (pen_camera_frame[0]+deltas[0], -1*(-pen_camera_frame[1]+deltas[1]), pen_camera_frame[2]-deltas[2]) 
-                print("GOAL POSITION",goal_position)
-                robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
-                robot.gripper.grasp()  
+                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame[2]+deltas[2])
+                print("goal position", goal_position)
+                _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
+                if success: 
+                    robot.gripper.grasp()  
+                else: 
+                    joints = robot.arm.get_joint_commands()
+                    T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
+                    [R, p] = mr.TransToRp(T) # get the rotation matrix and the displacement
+                    print("current robot position",p)
+                    print("GOAL POSITION",goal_position)
+
+                    
 
 
 
