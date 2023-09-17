@@ -21,7 +21,7 @@ def preprocess_image(image):
     kernel = np.ones((3, 3), np.uint8)
     image = cv2.erode(image, kernel, iterations=2)
     image = cv2.dilate(image, kernel, iterations=6)
-    image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, iterations=50)
+    image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, iterations=5)
     return image
 
 def find_pen_contours(image):
@@ -86,17 +86,10 @@ def pen_detection(d):
             found_pen = False
 
             for cnt in contours:
-                if cv2.arcLength(cnt, True) > 100:
+                if cv2.arcLength(cnt, True) > 250:
                     cv2.drawContours(color_img, contours[0:2], -1, (0, 255, 0), 1)
 
-                    if len(contours) == 2 and are_contours_near(contours[0], contours[1], max_distance=30, max_size_diff=3):
-                        top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
-                        average_x = int((top_center[0] + bottom_center[0]) / 2)
-                        average_y = int((top_center[1] + bottom_center[1]) / 2)
-                        center = (average_x, average_y)
-
-                    elif len(contours) == 1:
-                        center = compute_center(contours[0])
+                    center = compute_center(contours[0])
 
                     if center:
                         found_pen = True
@@ -180,11 +173,14 @@ def main():
                     print("Pen not found yet") 
                 
             if mode =='p':
-                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[1]+deltas[1], pen_camera_frame[2]+deltas[2])
+                goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[2]+deltas[1], -1*(-pen_camera_frame[2]+deltas[2]))
                 print("goal position", goal_position)
                 _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
                 if success: 
                     robot.gripper.grasp()  
+                    robot.gripper.release()
+                    print("current robot position",p)
+                    print("GOAL POSITION",goal_position)
                 else: 
                     joints = robot.arm.get_joint_commands()
                     T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
