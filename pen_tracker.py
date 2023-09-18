@@ -67,7 +67,6 @@ def pen_detection(d):
         config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
         cfg = pipe.start(config)
         profile = cfg.get_stream(rs.stream.color)
-        intr = profile.as_video_stream_profile().get_intrinsics()
     
         align_to = rs.stream.color
         align = rs.align(align_to)
@@ -75,10 +74,13 @@ def pen_detection(d):
         center = None
 
         while True:
+        
             frames = pipe.wait_for_frames()
             aligned_frames = align.process(frames)
             aligned_depth_frame = aligned_frames.get_depth_frame()
             color_frame = frames.get_color_frame()
+            intr = profile.as_video_stream_profile().get_intrinsics()
+        
 
             depth_img = np.asanyarray(aligned_depth_frame.get_data())
             color_img = np.asanyarray(color_frame.get_data())
@@ -99,9 +101,8 @@ def pen_detection(d):
             found_pen = False
 
             for cnt in contours:
-                if cv2.arcLength(cnt, True) > 250:
+                if cv2.arcLength(cnt, True) > 100:
                     cv2.drawContours(color_img, contours[0:2], -1, (0, 255, 0), 1)
-
 
                     if len(contours) == 2 and are_contours_near(contours[0], contours[1], max_distance=30, max_size_diff=3):
                         top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
@@ -109,7 +110,7 @@ def pen_detection(d):
                         average_y = int((top_center[1] + bottom_center[1]) / 2)
                         center = (average_x, average_y)
 
-                    elif len(contours) == 1:
+                    else: 
                         center = compute_center(contours[0])
    
 
@@ -133,8 +134,7 @@ def pen_detection(d):
 
                         cv2.circle(color_img, predicted_center, 10, (0, 0, 255), -1)
 
-                        pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [predicted_center[0], predicted_center[1]], depth)
-
+                        pen_camera_frame = rs.rs2_deproject_pixel_to_point(intr, [center[0],center[1]], depth)
                         d["pen_camera_frame"] = pen_camera_frame 
                         
             # If we didn't find the pen in this frame, use the tracked center from the previous frame
@@ -181,6 +181,7 @@ def main():
 
         while mode != 'q':
             pen_camera_frame = d["pen_camera_frame"]
+      
 
             mode = input("[h]ome, [s]leep, [q]uit, [c]alibrate, [p]en_tracking,") 
             if mode == 'h': 
@@ -198,14 +199,14 @@ def main():
                     robot.gripper.grasp() 
                     deltas = determine_deltas(pen_camera_frame) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
                     robot.gripper.release() 
-
                 else: 
                     print("Pen not found yet") 
                 
             if mode =='p':
+                pen_camera_frame = d["pen_camera_frame"]
+
                 goal_position = (pen_camera_frame[0]+deltas[0], pen_camera_frame[2]+deltas[1], -pen_camera_frame[1]+deltas[2])
-                print("goal position", goal_position)
-                _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2])
+                _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2],execute=True)
                 if success: 
                     robot.gripper.grasp()  
                     robot.gripper.release()
@@ -224,7 +225,9 @@ def main():
 
 
 
-
+#robot X: camera_x + (robot_x0 - camera_x0) 
+#robot Y: cmaera_z + (robot_y0 - camera_z0)
+#robot Z: -camera_y + (robot_z0 + camera_y0)
 
 
 if __name__ == "__main__":
