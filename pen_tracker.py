@@ -4,6 +4,7 @@ import pyrealsense2 as rs
 from interbotix_xs_modules.xs_robot.arm import InterbotixManipulatorXS
 import modern_robotics as mr 
 from multiprocessing import Process, Manager 
+import time 
 
 robot = InterbotixManipulatorXS("px100", "arm", "gripper")
 
@@ -104,7 +105,7 @@ def pen_detection(d):
                 if cv2.arcLength(cnt, True) > 100:
                     cv2.drawContours(color_img, contours[0:2], -1, (0, 255, 0), 1)
 
-                    if len(contours) == 2 and are_contours_near(contours[0], contours[1], max_distance=30, max_size_diff=3):
+                    if len(contours) == 2 and are_contours_near(contours[0], contours[1], max_distance=50, max_size_diff=2):
                         top_center, bottom_center = compute_center(contours[0]), compute_center(contours[1])
                         average_x = int((top_center[0] + bottom_center[0]) / 2)
                         average_y = int((top_center[1] + bottom_center[1]) / 2)
@@ -197,6 +198,7 @@ def main():
             if mode == 'c': 
                 if pen_camera_frame: 
                     robot.gripper.grasp() 
+                    time.sleep(.5)
                     deltas = determine_deltas(pen_camera_frame) #determines deltas between camera and robot frame, assuming that the pen is currently placed in the gripper
                     robot.gripper.release() 
                 else: 
@@ -209,9 +211,14 @@ def main():
                 _, success = robot.arm.set_ee_pose_components(x=goal_position[0],y=goal_position[1],z=goal_position[2],execute=True)
                 if success: 
                     robot.gripper.grasp()  
+                    time.sleep(.1)
+                    robot.arm.set_single_joint_position("waist",np.pi/2) 
+                    time.sleep(.1) 
                     robot.gripper.release()
-                    print("current robot position",p)
-                    print("GOAL POSITION",goal_position)
+                    time.sleep(.1) 
+                    robot.arm.set_single_joint_position("waist",0) 
+                    time.sleep(.1) 
+                    robot.arm.go_to_sleep_pose() 
                 else: 
                     joints = robot.arm.get_joint_commands()
                     T = mr.FKinSpace(robot.arm.robot_des.M, robot.arm.robot_des.Slist, joints)
@@ -221,13 +228,6 @@ def main():
 
                     
 
-
-
-
-
-#robot X: camera_x + (robot_x0 - camera_x0) 
-#robot Y: cmaera_z + (robot_y0 - camera_z0)
-#robot Z: -camera_y + (robot_z0 + camera_y0)
 
 
 if __name__ == "__main__":
